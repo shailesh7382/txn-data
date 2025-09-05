@@ -1,4 +1,5 @@
 from clickhouse_driver import Client
+import pandas as pd
 
 # Connect to ClickHouse server (update host, user, password as needed)
 client = Client(
@@ -23,9 +24,10 @@ SELECT
 FROM fx_price
 WHERE ccypair = 'EURUSD'
 ORDER BY timestamp DESC
-LIMIT 10
 """
 
 result = client.execute(query)
-for row in result:
-    print(row)
+columns = ['timestamp', 'date', 'bids', 'asks', 'qtys', 'ccypair', 'quoteId', 'name']
+df = pd.DataFrame(result, columns=columns)
+df.set_index('timestamp', inplace=True)
+print(df)
