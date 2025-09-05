@@ -2,3 +2,4 @@
 # pdfplumber: PDF table extraction (reliable, easy to use)
 fpdf==1.7.2
 pdfplumber==0.10.3
+clickhouse-driver==0.2.6
