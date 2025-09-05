@@ -30,21 +30,73 @@ This utility provides a complete workflow for generating, extracting, and enrich
 └── generated-pdf/                 # Output directory for PDFs
 ----
 
-== Setup
+== Python Setup
 
-. (Recommended) Create and activate a Python virtual environment:
-+
+This project requires Python 3.8 or newer. It is strongly recommended to use a virtual environment to avoid dependency conflicts.
+
+=== 1. Check Python Version
+
+Ensure you have Python 3.8+:
+
+[source,shell]
+----
+python3 --version
+----
+
+If you do not have Python 3 installed, download it from https://www.python.org/downloads/
+
+=== 2. Create and Activate a Virtual Environment
+
 [source,shell]
 ----
 python3 -m venv .venv
 source .venv/bin/activate
 ----
 
-. Install all dependencies:
-+
+If you are on Windows, activate with:
+
+[source,cmd]
+----
+.venv\Scripts\activate
+----
+
+=== 3. Upgrade pip (recommended)
+
+[source,shell]
+----
+python -m pip install --upgrade pip
+----
+
+=== 4. Install Dependencies
+
+All required Python packages are listed in `requirements.txt`:
+
 [source,shell]
 ----
 pip install -r requirements.txt
+----
+
+This will install:
+
+* `fpdf` - for PDF generation
+* `pdfplumber` - for extracting tables from PDFs
+* `clickhouse-driver` - for connecting to ClickHouse
+* `pandas` - for data manipulation
+
+=== 5. Troubleshooting Python Setup
+
+* If you see errors about missing packages, ensure your virtual environment is activated.
+* If you see errors about incompatible Python versions, upgrade your Python installation.
+* If you have permission errors, try adding `--user` to your pip install command or use a virtual environment.
+* If you are using an M1/M2 Mac or other ARM-based system, some packages may require additional system dependencies.
+
+=== 6. Deactivating the Virtual Environment
+
+When you are done, you can deactivate the environment with:
+
+[source,shell]
+----
+deactivate
 ----
 
 == Workflow
@@ -232,27 +284,4 @@ print(df)
 * Make sure the time window for transactions overlaps with the price data in ClickHouse.
 * If you see parsing errors for `tradedatetime`, check the date format in the PDF/CSV.
 * All scripts assume the working directory is the project root.
-
-== Requirements
-
-All dependencies are listed in `requirements.txt`:
-
-[source]
-----
-fpdf==1.7.2
-pdfplumber==0.10.3
-clickhouse-driver==0.2.6
-pandas==2.2.2
-----
-
-Install with:
-
-[source,shell]
-----
-pip install -r requirements.txt
-----
-
-== License
-
-MIT License (see LICENSE file if present).
 
