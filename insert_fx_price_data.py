@@ -27,10 +27,14 @@ date_str = '2025-07-22'
 date_obj = datetime.strptime(date_str, '%Y-%m-%d')
 date_only = date_obj.date()  # Use as date object
 
+start_time = datetime(2025, 7, 22, 1, 0, 0)
+end_time = datetime(2025, 7, 22, 2, 0, 0)
+total_seconds = int((end_time - start_time).total_seconds())
+
 rows = []
 for idx, ccypair in enumerate(ccypairs):
-    for i in range(10):  # 10 ticks per ccypair
-        ts = date_obj + timedelta(seconds=i * 10)
+    for i in range(total_seconds):  # 1-second intervals between 1am and 2am
+        ts = start_time + timedelta(seconds=i)
         bids = [round(bids_base[idx] - 0.0001 * j - random.uniform(0, 0.0002), 6) for j in range(3)]
         asks = [round(asks_base[idx] + 0.0001 * j + random.uniform(0, 0.0002), 6) for j in range(3)]
         row = (
@@ -56,4 +60,4 @@ client.execute(
     rows
 )
 
-print(f"Inserted {len(rows)} rows into fx_price for {date_str}.")
+print(f"Inserted {len(rows)} rows into fx_price for {date_str} between 1am and 2am with 1-second intervals.")
