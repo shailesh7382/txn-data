@@ -51,6 +51,37 @@ df['ccypair_used'] = None
 df['reciprocal'] = False
 df['cross_used'] = None
 
+# Add a column to indicate if bid price was used for transaction evaluation
+df['used_bid'] = None
+
+def determine_used_bid(buy_sell, from_ccy, to_ccy, used_ccypair, reciprocal):
+    """
+    Determines if bid or ask is used for the transaction, considering the direction and the standard pair.
+    Returns True if bid is used, False if ask is used, None if undetermined.
+    """
+    if not buy_sell:
+        return None
+    buy_sell = buy_sell.strip().lower()
+    # Standardize the pair direction to match fx_price convention
+    # used_ccypair is the pair as found in fx_price (e.g., USDSGD)
+    # reciprocal is True if the transaction direction is opposite to the fx_price pair
+    if used_ccypair is None:
+        return None  # For cross pairs, skip (or handle separately if needed)
+    # If reciprocal, invert the logic
+    if reciprocal:
+        # Transaction is in the reverse direction of the fx_price pair
+        if buy_sell == 'buy':
+            return True   # Buy (reverse) uses bid
+        elif buy_sell == 'sell':
+            return False  # Sell (reverse) uses ask
+    else:
+        # Transaction matches fx_price pair direction
+        if buy_sell == 'buy':
+            return False  # Buy uses ask
+        elif buy_sell == 'sell':
+            return True   # Sell uses bid
+    return None
+
 print("Processing transactions and enriching with FX rates...")
 for idx, row in df.iterrows():
     print(f"\nProcessing transaction {idx+1}/{len(df)}...")
@@ -109,6 +140,11 @@ for idx, row in df.iterrows():
         df.at[idx, 'ccypair_used'] = used_ccypair
         df.at[idx, 'reciprocal'] = reciprocal
         df.at[idx, 'cross_used'] = None
+
+        # Use new logic for bid/ask determination
+        buy_sell = (row.get('buy/sell') or row.get('buy_sell') or '')
+        used_bid = determine_used_bid(buy_sell, from_ccy, to_ccy, used_ccypair, reciprocal)
+        df.at[idx, 'used_bid'] = used_bid
         continue
 
     # Cross pair: neither from_ccy nor to_ccy is USD
@@ -207,6 +243,9 @@ for idx, row in df.iterrows():
     df.at[idx, 'ccypair_used'] = None
     df.at[idx, 'reciprocal'] = None
     df.at[idx, 'cross_used'] = cross_used
+
+    # For cross pairs, set to None (or implement similar logic if needed)
+    df.at[idx, 'used_bid'] = None
 
 print("Writing enriched transactions to fx_transactions_with_rates.csv...")
 df.to_csv("fx_transactions_with_rates.csv", index=False)
