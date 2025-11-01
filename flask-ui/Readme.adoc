@@ -1,0 +1,16 @@
+=== Create and activate a virtualenv
+----
+python -m venv .venv
+source .venv/bin/activate  # on Windows: .venv\Scripts\activate
+----
+
+
+=== Install deps
+----
+pip install -r requirements.txt
+----
+=== Start the app
+----
+python app.py
+# App will be on http://127.0.0.1:5000/
+----
