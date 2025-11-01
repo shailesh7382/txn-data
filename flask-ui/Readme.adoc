@@ -1,3 +1,622 @@
+= Flask: Best Practices & Advanced Usage
+:toc: macro
+:toclevels: 3
+:sectnums:
+:source-highlighter: rouge
+:icons: font
+:doctype: book
+
+toc::[]
+
+== Philosophy & Scope
+
+Flask is a lightweight WSGI web framework with a strong extension ecosystem.
+Use it when you want explicit control over architecture, dependencies, and runtime.
+This guide covers proven patterns for production-grade Flask: structure, configuration, security, testing, performance, async, observability, and deployment.
+
+== Project Structure
+
+A maintainable layout favors the *application factory* pattern, Blueprints, and environment-specific config.
+
+----
+yourapp/
+├─ pyproject.toml            # or setup.cfg + requirements
+├─ run.py                    # dev entrypoint (optional)
+├─ .env                      # local env vars (never commit secrets)
+├─ yourapp/
+│  ├─ __init__.py            # app factory lives here
+│  ├─ config.py              # configuration objects
+│  ├─ extensions.py          # db, cache, login_manager, csrf, etc.
+│  ├─ blueprints/
+│  │  ├─ public/             # public routes
+│  │  │  ├─ __init__.py
+│  │  │  └─ views.py
+│  │  └─ api/                # API (versioned)
+│  │     ├─ __init__.py
+│  │     └─ resources.py
+│  ├─ models/                # SQLAlchemy models (or pydantic schemas)
+│  ├─ services/              # domain services, clients, tasks
+│  ├─ templates/             # Jinja2 templates
+│  ├─ static/                # assets
+│  └─ cli.py                 # custom Flask CLI commands
+└─ tests/
+   ├─ conftest.py
+   └─ test_app.py
+----
+
+== Application Factory
+
+Use a factory to create an app per environment and for testability.
+
+[source,python]
+----
+# yourapp/__init__.py
+from flask import Flask
+from . import extensions
+from .blueprints.public import bp as public_bp
+from .blueprints.api import bp as api_bp
+
+def create_app(config_object="yourapp.config.ProdConfig"):
+    app = Flask(__name__, instance_relative_config=True)
+    app.config.from_object(config_object)
+
+    # Optionally load secrets from instance folder or env
+    # app.config.from_pyfile("secrets.py", silent=True)
+
+    _register_extensions(app)
+    _register_blueprints(app)
+    _register_cli(app)
+    _register_error_handlers(app)
+
+    return app
+
+def _register_extensions(app):
+    extensions.db.init_app(app)
+    extensions.migrate.init_app(app, extensions.db)
+    extensions.cache.init_app(app)
+    extensions.csrf.init_app(app)
+    extensions.login.init_app(app)
+
+def _register_blueprints(app):
+    app.register_blueprint(public_bp)
+    app.register_blueprint(api_bp, url_prefix="/api/v1")
+
+def _register_cli(app):
+    from .cli import register_commands
+    register_commands(app)
+
+def _register_error_handlers(app):
+    from flask import jsonify
+    @app.errorhandler(404)
+    def not_found(e):
+        return jsonify({"error": "not_found"}), 404
+----
+
+== Configuration Management
+
+Prefer 12-factor configuration: env vars + sane defaults. Keep secrets out of VCS.
+
+[source,python]
+----
+# yourapp/config.py
+import os
+
+class BaseConfig:
+    SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite:///local.db")
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    CACHE_TYPE = "SimpleCache"  # "RedisCache" in prod
+    JSON_SORT_KEYS = False
+    # Security
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+    # Logging
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+class DevConfig(BaseConfig):
+    DEBUG = True
+
+class TestConfig(BaseConfig):
+    TESTING = True
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+
+class ProdConfig(BaseConfig):
+    CACHE_TYPE = "RedisCache"
+    CACHE_REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+----
+
+TIP: Libraries like *python-dotenv*, *dynaconf*, or *pydantic-settings* help manage complex configs.
+
+== Extensions Hub
+
+Centralize extensions to avoid circular imports.
+
+[source,python]
+----
+# yourapp/extensions.py
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from flask_caching import Cache
+from flask_wtf import CSRFProtect
+from flask_login import LoginManager
+
+db = SQLAlchemy()
+migrate = Migrate()
+cache = Cache()
+csrf = CSRFProtect()
+login = LoginManager()
+login.login_view = "public.login"
+----
+
+== Blueprints & Views
+
+[source,python]
+----
+# yourapp/blueprints/public/__init__.py
+from flask import Blueprint
+bp = Blueprint("public", __name__)
+
+from . import views
+----
+
+[source,python]
+----
+# yourapp/blueprints/public/views.py
+from flask import render_template
+from . import bp
+
+@bp.get("/")
+def home():
+    return render_template("home.html")
+----
+
+== Database & Migrations
+
+Use SQLAlchemy + Alembic (via Flask-Migrate).
+
+[source,python]
+----
+# yourapp/models/user.py
+from ..extensions import db
+from datetime import datetime
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+----
+
+Migrations:
+
+[source,bash]
+----
+flask db init
+flask db migrate -m "Create user"
+flask db upgrade
+----
+
+== Input Validation & Serialization
+
+Pick one: *marshmallow*, *pydantic*, or *webargs*/*flask-smorest*.
+
+[source,python]
+----
+# with marshmallow
+from marshmallow import Schema, fields, validate
+
+class UserIn(Schema):
+    email = fields.Email(required=True)
+    name  = fields.Str(required=True, validate=validate.Length(min=1))
+
+class UserOut(Schema):
+    id = fields.Int()
+    email = fields.Email()
+    name = fields.Str()
+----
+
+== API with OpenAPI (flask-smorest)
+
+[source,python]
+----
+# yourapp/blueprints/api/__init__.py
+from flask import Blueprint
+bp = Blueprint("api", __name__)
+----
+
+[source,python]
+----
+# yourapp/blueprints/api/resources.py
+from flask_smorest import Blueprint as SBP, abort
+from flask import request
+from ...extensions import db
+from ...models.user import User
+from ...schemas import UserIn, UserOut
+
+blp = SBP("users", __name__, url_prefix="/users", description="User API")
+
+@blp.route("/")
+class UsersResource:
+    @blp.response(200, UserOut(many=True))
+    def get(self):
+        return User.query.all()
+
+    @blp.arguments(UserIn)
+    @blp.response(201, UserOut)
+    def post(self, payload):
+        if User.query.filter_by(email=payload["email"]).first():
+            abort(409, message="Email exists")
+        u = User(**payload)
+        db.session.add(u)
+        db.session.commit()
+        return u
+----
+
+Register the API and OpenAPI docs:
+
+[source,python]
+----
+# in yourapp/__init__.py _register_extensions
+from flask_smorest import Api
+extensions.api = Api()
+extensions.api.init_app(app)
+extensions.api.register_blueprint(api_bp)  # where api_bp wraps blp.blueprint
+app.config.update(
+    API_TITLE="YourApp API",
+    API_VERSION="v1",
+    OPENAPI_VERSION="3.1.0",
+    OPENAPI_URL_PREFIX="/",
+    OPENAPI_JSON_PATH="openapi.json",
+    OPENAPI_REDOC_PATH="/redoc",
+    OPENAPI_REDOC_URL="https://cdn.jsdelivr.net/npm/redoc/bundles/redoc.standalone.js",
+)
+----
+
+== Authentication & Authorization
+
+*Session-based:* `Flask-Login` (with CSRF via `Flask-WTF`).
+*Token-based:* JWT (e.g., `flask-jwt-extended`) for APIs.
+
+Security checklist:
+
+* Use HTTPS end-to-end; set `SESSION_COOKIE_SECURE = True` in prod.
+* Enable CSRF for forms; use double-submit or header token for APIs.
+* Rate-limit sensitive endpoints (`flask-limiter`).
+* Store password hashes with *argon2* or *bcrypt* (never plaintext).
+* Consider *feature flags* for risky rollouts.
+
+== Templates & Frontend Integration
+
+*Jinja2 tips:*
+
+* Use macros/components for repeated UI chunks.
+* Autoescape enabled by default; never mark unsafe input as `|safe`.
+* Cache expensive fragments with `flask-caching`.
+
+*SPA integration (React/Vue):*
+
+* Serve SPA via a separate origin; enable CORS (`flask-cors`).
+* For SSR/SEO, keep a small server-rendered shell or static landing pages.
+
+== Background Jobs & Scheduled Tasks
+
+* *Celery* or *RQ* with Redis for durable jobs.
+* Use a *task wrapper* that logs correlation IDs and retries with backoff.
+
+[source,python]
+----
+# RQ example
+from rq import Queue
+from redis import Redis
+redis = Redis.from_url("redis://redis:6379/0")
+taskq = Queue("default", connection=redis)
+
+def send_welcome_email(user_id): ...
+
+# enqueue
+taskq.enqueue(send_welcome_email, user_id)
+----
+
+== File Uploads & Media
+
+* Validate content type and size.
+* Stream to S3/GCS (avoid storing large files on app disk).
+* Generate pre-signed URLs; never expose raw buckets.
+
+== Caching Strategy
+
+* Page, fragment, and data caching (Redis).
+* Cache keys include user/locale/version.
+* Use *dogpile* pattern to avoid thundering herds.
+
+[source,python]
+----
+from yourapp.extensions import cache
+
+@cache.cached(timeout=60, key_prefix=lambda: f"home:{g.locale}")
+def expensive_home():
+    ...
+----
+
+== Logging & Observability
+
+* Log in JSON for structured ingestion (e.g., ELK, OpenSearch).
+* Include request IDs and user IDs.
+
+[source,python]
+----
+# JSON logging snippet
+import logging, json
+from flask import g, request
+
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        payload = {
+            "level": record.levelname,
+            "msg": record.getMessage(),
+            "logger": record.name,
+            "path": getattr(request, 'path', None),
+            "request_id": getattr(g, 'request_id', None),
+        }
+        return json.dumps(payload)
+
+handler = logging.StreamHandler()
+handler.setFormatter(JSONFormatter())
+app.logger.addHandler(handler)
+app.logger.setLevel(app.config["LOG_LEVEL"])
+----
+
+*Tracing:* OpenTelemetry with OTLP exporter + auto-instrumentation (`opentelemetry-instrumentation-flask`).
+
+== Rate Limiting & Abuse Protection
+
+`flask-limiter` example:
+
+[source,python]
+----
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+limiter = Limiter(get_remote_address, default_limits=["200/minute"])
+limiter.init_app(app)
+
+@bp.get("/login")
+@limiter.limit("10/minute")
+def login(): ...
+----
+
+== Security Hardening
+
+* Set secure headers: `flask-talisman` or custom middleware (CSP, HSTS).
+* Validate all inputs; sanitize filenames.
+* Rotate secrets; prefer IAM roles over static keys in cloud.
+* Keep dependencies patched (use `pip-audit`, Dependabot).
+
+== Testing Strategy (pytest)
+
+* *Unit tests* for pure logic (services).
+* *Functional tests* for routes with `app.test_client()`.
+* *Integration tests* with a temp DB and factories.
+
+[source,python]
+----
+# tests/conftest.py
+import pytest
+from yourapp import create_app
+from yourapp.extensions import db
+
+@pytest.fixture()
+def app():
+    app = create_app("yourapp.config.TestConfig")
+    with app.app_context():
+        db.create_all()
+    yield app
+    with app.app_context():
+        db.drop_all()
+
+@pytest.fixture()
+def client(app):
+    return app.test_client()
+----
+
+[source,python]
+----
+# tests/test_app.py
+def test_health(client):
+    r = client.get("/")
+    assert r.status_code in (200, 302)
+----
+
+== Performance & Concurrency
+
+* Use *Gunicorn* with multiple workers; prefer *gevent* or *uvicorn workers* only when IO-bound and compatible.
+* Flask supports `async def` views; however, it remains WSGI-first. For heavy async workloads, consider *Quart* (ASGI-native) or split services.
+* Profile with `py-spy`/`scalene`; optimize hot paths; avoid global locks.
+
+Gunicorn example:
+
+[source,bash]
+----
+gunicorn "yourapp:create_app()" -w 4 -b 0.0.0.0:8000 --access-logfile -
+----
+
+== Deployment & Ops
+
+=== Dockerfile
+
+[source,dockerfile]
+----
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+COPY pyproject.toml poetry.lock* requirements.txt* /app/
+RUN pip install -r requirements.txt
+
+COPY . /app
+ENV FLASK_APP=yourapp:create_app()
+ENV FLASK_ENV=production
+
+EXPOSE 8000
+CMD ["gunicorn", "yourapp:create_app()", "-w", "4", "-b", "0.0.0.0:8000"]
+----
+
+=== Reverse Proxy (Nginx)
+
+[source,nginx]
+----
+server {
+  listen 80;
+  server_name example.com;
+
+  location / {
+    proxy_pass http://app:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+----
+
+== CLI & Admin Tasks
+
+Expose operational commands via Flask CLI.
+
+[source,python]
+----
+# yourapp/cli.py
+import click
+from .extensions import db
+from .models.user import User
+
+def register_commands(app):
+    @app.cli.command("create-admin")
+    @click.argument("email")
+    def create_admin(email):
+        u = User(email=email, name="Admin")
+        db.session.add(u)
+        db.session.commit()
+        click.echo(f"Admin created: {email}")
+----
+
+== Emails & Notifications
+
+* Use transactional providers (SES/SendGrid).
+* Send via background tasks.
+* Render emails with Jinja templates separate from web templates.
+
+== Internationalization (i18n)
+
+* `flask-babel` for locale-aware formatting (dates/numbers).
+* Store `Accept-Language` and user preferences; cache per-locale.
+
+== Static Assets
+
+* Use a build pipeline (esbuild/Vite/Webpack).
+* Fingerprint assets; set long cache TTL with cache-busting.
+* Serve via CDN in prod.
+
+== Advanced Patterns
+
+* *Service layer* between views and models for business logic.
+* *Repository pattern* if swapping persistence.
+* *Domain events* for decoupling (publish-subscribe inside app).
+* *Outbox pattern* when integrating with external systems.
+* *Feature flags* (e.g., Flagr, Unleash) for gradual rollouts.
+
+== Common Pitfalls
+
+* Doing heavy work in request thread → move to job queue.
+* Global mutable state shared across workers.
+* Leaking DB sessions (use context handlers; teardown_appcontext).
+* Silent 500s: always surface errors with structured logging and alerts.
+
+== Minimal Dependencies (Suggested)
+
+[source,toml]
+----
+# requirements.txt (sample)
+Flask
+Flask-SQLAlchemy
+Flask-Migrate
+Flask-Caching
+Flask-WTF
+Flask-Login
+flask-smorest
+marshmallow
+python-dotenv
+gunicorn
+redis
+rq
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-instrumentation-flask
+----
+
+== Quick Start Snippets
+
+=== create_app entrypoint
+
+[source,python]
+----
+# run.py
+from yourapp import create_app
+app = create_app()
+if __name__ == "__main__":
+    app.run()
+----
+
+=== Healthcheck
+
+[source,python]
+----
+@bp.get("/healthz")
+def healthz():
+    return {"status": "ok"}, 200
+----
+
+=== CORS (if SPA)
+
+[source,python]
+----
+from flask_cors import CORS
+CORS(app, resources={r"/api/*": {"origins": "https://your-frontend"}})
+----
+
+== Checklist (Prod Readiness)
+
+* [ ] App factory + Blueprints
+* [ ] 12-factor config + secrets outside VCS
+* [ ] DB migrations + seed scripts
+* [ ] Structured logging + tracing + metrics
+* [ ] Reverse proxy + TLS + HSTS
+* [ ] CSRF/CORS/Rate limiting
+* [ ] Background jobs + retries
+* [ ] Cache strategy + Redis
+* [ ] Tests + CI + coverage gates
+* [ ] Containerized deploy + rollbacks
+* [ ] Monitors + alerts + SLOs
+
+== When to Consider Alternatives
+
+* Heavy real-time async/websockets → Quart/FastAPI (ASGI).
+* CPU-bound workloads → split into worker microservice; consider Rust/Go for hot loops.
+* CRUD admin backoffice → Flask-Admin/Flask-AppBuilder to accelerate.
+
+== Further Reading (Topics)
+
+* OpenAPI-first dev, schema evolution, client generation
+* Blue-green/canary deployments and feature flags
+* Multi-region deployments with sticky sessions (or JWT)
+* Zero-downtime migrations and data backfills
+
+
+
+
 === Create and activate a virtualenv
 ----
 python -m venv .venv
@@ -7,7 +626,7 @@ source .venv/bin/activate  # on Windows: .venv\Scripts\activate
 
 === Install deps
 ----
-pip install -r requirements.txt
+pip install .
 ----
 === Start the app
 ----

@@ -1,2 +1,4 @@
 /.idea/
 /flask-ui/instance/
+/flask-ui/build/
+/flask-ui/flask_ui.egg-info/

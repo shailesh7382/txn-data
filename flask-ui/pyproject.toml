@@ -1,0 +1,62 @@
+# TOML file describing project metadata and build system (PEP 621 compatible)
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "pip>=23.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flask-ui"
+version = "0.1.0"
+description = "Simple Flask UI for user management (example project)"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+  { name = "Shailesh", email = "shailesh@example.com" }
+]
+requires-python = ">=3.10"
+
+keywords = ["flask", "users", "admin", "example"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Framework :: Flask",
+  "Topic :: Software Development :: Libraries :: Application Frameworks"
+]
+
+dependencies = [
+  "Flask==3.0.3",
+  "Flask-SQLAlchemy==3.1.1"
+]
+
+[project.urls]
+homepage = "https://github.com/shailesh/txn-data"
+repository = "https://github.com/shailesh/txn-data/tree/main/flask-ui"
+documentation = "https://github.com/shailesh/txn-data#readme"
+"Bug Tracker" = "https://github.com/shailesh/txn-data/issues"
+
+# Added: optional dev dependencies so developers can install tooling via the pyproject
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+  "black>=24.0",
+  "isort>=5.0",
+  "flake8>=6.0"
+]
+prod = [
+  "gunicorn>=20.0"
+]
+
+# Added: minimal setuptools package discovery hints if packaging later
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+
+# Added: editor/formatting tool config (keeps repo consistent)
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+known_first_party = ["flask_ui"]
